@@ -1,0 +1,146 @@
+Step 0 ->Permitindo acesso a um usuário pre definido<-
+
+Dependencias = 
+		##Dependencia do JWT##
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt</artifactId>
+			<version>0.9.1</version>
+		</dependency>
+		
+		##Dependencia do Jaxb##
+		<dependency>
+			<groupId>javax.xml.bind</groupId>
+			<artifactId>jaxb-api</artifactId>
+		</dependency>
+____________________________________________________________________________________________________________________
+
+|Class SecurityConfigurer extends WebSecurityConfigurerAdapter |
+Annotations => @EnableWebSecurity
+Atributes => MyUserDetailsService myUserDetailsService
+Methods =>@Override void configure(AuthenticationManagerBuilder auth) throws Exception{
+		auth.userDetailsService(myUserDetailsService);}
+	  @Bean PasswordEncoder passwordEncoder(){
+		return NoOpPasswordEncoder.getInstance();}
+____________________________________________________________________________________________________________________
+
+|Class MyUserDetailsService implements UserDetailsService|
+Annotations => @Service
+Methods => @Override UserDetails loadUserByUsername(String userName) throws UsernameNotFoundException{
+		return new User("admin", "admin",new ArrayList<>());
+}
+
+____________________________________________________________________________________________________________________
+
+|Class JwtUtil implements Serializable|
+Annotations => @Component
+Atributes => long serialVersionUID
+	     long JWT_TOKEN_VALIDITY
+
+Methods =>public String getUsernameFromToken(String token){
+		return getClaimFromToken(token, Claims::getSubject);
+}
+          public Date getExpirationDateFromToken(String token){
+ 		return getClaimFromToken(token, Claims::getExpiration);
+}
+	  private <T>T getClaimFromToken(String token, Function<Claims, T> claimsResolver ){
+		final Claims claims = getAllClaimsFromToken(token);
+   		return claimsResolver.apply(claims);
+}
+
+	  private Claims getAllClaimsFromToken(String token){
+		return Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token).getBody();
+}
+	  private boolean isTokenExpired(String token){
+		final Date expiration = getExpirationDateFromToken(token);
+        return expiration.before(new Date());
+}
+	  public String generateToken(UserDetails userDetails){
+		Map<String, Object> claims = new HashMap<>();
+        	return doGenerateToken(claims, userDetails.getUsername());
+}
+	  private String doGenerateToken(Map<String, Object> claims, String subject){
+		return Jwts.builder().setClaims(claims).setSubject(subject).setIssuedAt(new Date(System.currentTimeMillis()))
+                .setExpiration(new Date(System.currentTimeMillis() + JWT_TOKEN_VALIDITY * 1000))
+                .signWith(SignatureAlgorithm.HS256, secretKey).compact();
+}
+	  public Boolean validateToken(String token, UserDetails userDetails){
+		final String username = getUsernameFromToken(token);
+        	return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+}
+
+____________________________________________________________________________________________________________________
+
+
+|Class Hello|
+Annotations => @RestController		##Uma classe construída apenas para testar o EndPoint##
+Methods => @GetMapping("/hello")
+    	       public String hello(){
+                         return "Hello World";
+                        }
+
+
+____________________________________________________________________________________________________________________
+
+Step 1 ->Gerando diferentes tokens para acessos com Id e Password <-
+
+Acrescentar os métodos a classe:
+
+|Class SecurityConfigurer extends WebSecurityConfigurerAdapter |
+
+@Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.csrf().disable()
+                .authorizeRequests().antMatchers("/authenticate").permitAll()
+                .anyRequest().authenticated();
+    }
+
+@Bean
+    @Override
+    public AuthenticationManager authenticationManagerBean() throws Exception {
+        return super.authenticationManagerBean();
+    }
+
+____________________________________________________________________________________________________________________
+
+Acrescentar os métodos e atributos a classe:
+
+|Class Hello|
+
+  @Autowired
+    private JwtUtil jwtUtil;
+
+   @Autowired
+    private AuthenticationManager authenticationManager;
+
+   @Autowired
+    private MyUserDetailsService userDetailsService;
+
+
+@PostMapping("/authenticate")
+    public ResponseEntity<?> createAuthenticationToken(@RequestBody JwtRequest jwtRequest) throws Exception {
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(jwtRequest.getUsername(), jwtRequest.getPassword()));
+
+        }catch(BadCredentialsException e){
+            throw new Exception("username ou senha incorretos", e);
+        }
+        final UserDetails userDetails = userDetailsService.loadUserByUsername(jwtRequest.getUsername());
+        final String jwt = jwtUtil.generateToken(userDetails);
+        return ResponseEntity.ok(new JwtResponse(jwt));
+    }
+
+____________________________________________________________________________________________________________________
+
+|class JwtRequest|
+Annotations =>@Data , @AllArgsConstructor , @NoArgsConstructor
+Atributes =>String username
+	    String password
+
+____________________________________________________________________________________________________________________
+
+|class JwtResponse|
+Annotations =>@Data , @AllArgsConstructor , @NoArgsConstructor
+Atributes =>String jwt
+	   
